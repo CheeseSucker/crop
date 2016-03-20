@@ -17,12 +17,6 @@ abstract class Crop
     protected static $start_time = 0.0;
 
     /**
-     *
-     * @var \Imagick
-     */
-    protected $originalImage = null;
-
-    /**
      * Filter to use when resizing:
      * http://php.net/manual/en/imagick.constants.php#imagick.constants.filters
      * @var int
@@ -195,22 +189,75 @@ abstract class Crop
      * @param  int              $targetHeight
      * @return boolean|\Imagick
      */
-    public function resizeAndCrop($targetWidth, $targetHeight)
+    public function resizeAndCrop($targetWidth, $targetHeight, \Imagick $image = null)
     {
+        if ($image === null) {
+            $image = $this->originalImage;
+        }
         if ($this->getAutoOrient()) {
-            $this->autoOrient();
+            self::autoOrient($image);
         }
 
         // First get the size that we can use to safely trim down the image without cropping any sides
-        $crop = $this->getSafeResizeOffset($this->originalImage, $targetWidth, $targetHeight);
+        $crop = $this->getSafeResizeOffset($image, $targetWidth, $targetHeight);
         // Resize the image
-        $this->originalImage->resizeImage($crop['width'], $crop['height'], $this->getFilter(), $this->getBlur());
+        $image->resizeImage($crop['width'], $crop['height'], $this->getFilter(), $this->getBlur());
         // Get the offset for cropping the image further
-        $offset = $this->getSpecialOffset($this->originalImage, $targetWidth, $targetHeight);
+        $offset = $this->getSpecialOffset($image, $targetWidth, $targetHeight);
         // Crop the image
-        $this->originalImage->cropImage($targetWidth, $targetHeight, $offset['x'], $offset['y']);
+        $image->cropImage($targetWidth, $targetHeight, $offset['x'], $offset['y']);
 
-        return $this->originalImage;
+        return $image;
+    }
+
+    public function resizeAndCropRectangle($x, $y, $width, $height, $targetWidth, $targetHeight, \Imagick $image = null) {
+        if ($image === null) {
+            $image = clone($this->originalImage);
+        }
+
+        if ($this->getAutoOrient()) {
+            self::autoOrient($image);
+        }
+
+        $imageWidth = $image->getImageWidth();
+        $imageHeight = $image->getImageHeight();
+        $image->cropImage($width * $imageWidth, $height * $imageHeight, $x * $imageWidth, $y * $imageHeight);
+        $image->resizeImage($targetWidth, $targetHeight, $this->getFilter(), $this->getBlur());
+        return $image;
+    }
+
+    /**
+     * Resize and crop the image so it dimensions matches $targetWidth and $targetHeight
+     *
+     * @param  int   $targetWidth
+     * @param  int   $targetHeight
+     * @return array Normalized ractangle with values between 0 and 1.
+     */
+    public function getCropRectangle($targetWidth, $targetHeight, \Imagick $image = null)
+    {
+        if ($image === null) {
+            $image = clone($this->originalImage);
+        }
+        if ($this->getAutoOrient()) {
+            self::autoOrient($image);
+        }
+
+        // First get the size that we can use to safely trim down the image without cropping any sides
+        $crop = $this->getSafeResizeOffset($image, $targetWidth, $targetHeight);
+        // Resize the image
+        $image->resizeImage($crop['width'], $crop['height'], $this->getFilter(), $this->getBlur());
+        // Get the offset for cropping the image further
+        $offset = $this->getSpecialOffset($image, $targetWidth, $targetHeight);
+
+        return [
+            'width' => $targetWidth / (float)$image->getImageWidth(),
+            'height' => $targetHeight / (float)$image->getImageHeight(),
+            'x' => $offset['x'] / (float)$image->getImageWidth(),
+            'y' => $offset['y'] / (float)$image->getImageHeight(),
+            'aspectRatio' => $targetWidth / (float)$targetHeight,
+            'targetWidth' => $targetWidth,
+            'targetHeight' => $targetHeight,
+        ];
     }
 
     /**
@@ -306,24 +353,25 @@ abstract class Crop
      * Applies EXIF orientation metadata to pixel data and removes the EXIF rotation
      *
      * @access protected
+     * @param \Imagick $image
      */
-    protected function autoOrient()
+    protected static function autoOrient(\Imagick $image)
     {
         // apply EXIF orientation to pixel data
-        switch ($this->originalImage->getImageOrientation()) {
+        switch ($image->getImageOrientation()) {
             case \Imagick::ORIENTATION_BOTTOMRIGHT:
-                $this->originalImage->rotateimage('#000', 180); // rotate 180 degrees
+                $image->rotateimage('#000', 180); // rotate 180 degrees
                 break;
             case \Imagick::ORIENTATION_RIGHTTOP:
-                $this->originalImage->rotateimage('#000', 90); // rotate 90 degrees CW
+                $image->rotateimage('#000', 90); // rotate 90 degrees CW
                 break;
             case \Imagick::ORIENTATION_LEFTBOTTOM:
-                $this->originalImage->rotateimage('#000', -90); // rotate 90 degrees CCW
+                $image->rotateimage('#000', -90); // rotate 90 degrees CCW
                 break;
         }
 
         // reset EXIF orientation
-        $this->originalImage->setImageOrientation(\Imagick::ORIENTATION_TOPLEFT);
+        $image->setImageOrientation(\Imagick::ORIENTATION_TOPLEFT);
     }
 
     /**
